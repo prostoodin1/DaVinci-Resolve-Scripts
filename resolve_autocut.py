@@ -93,24 +93,33 @@ def keep_ranges(log, fps, frame_count, padding):
     return clips
 
 
-def create_timeline(source, destination, threshold, minimum, padding):
+def probe(source):
+    return json.loads(run(
+        "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", source
+    ).stdout)
+
+
+def create_timeline(source, destination, threshold, minimum, padding, external_audio=None):
     if not all(map(math.isfinite, (threshold, minimum, padding))):
         raise ValueError("Введи конечные числа.")
     if threshold >= 0 or minimum <= 0 or padding < 0:
         raise ValueError("Порог должен быть ниже 0 дБ, пауза больше 0, запас от 0.")
     source = source.resolve(strict=True)
+    if external_audio is not None:
+        external_audio = external_audio.resolve(strict=True)
+        if external_audio == source:
+            external_audio = None
     destination = destination.resolve()
     if source == destination or destination.suffix.lower() != ".fcpxml":
         raise ValueError("Укажи отдельный выходной файл с расширением .fcpxml.")
 
-    info = json.loads(run(
-        "ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", source
-    ).stdout)
+    info = probe(source)
     video = next((s for s in info["streams"] if s["codec_type"] == "video"
                   and not s.get("disposition", {}).get("attached_pic")), None)
-    audio_streams = [s for s in info["streams"] if s["codec_type"] == "audio"]
+    audio_info = probe(external_audio) if external_audio else info
+    audio_streams = [s for s in audio_info["streams"] if s["codec_type"] == "audio"]
     if video is None or not audio_streams:
-        raise ValueError("Нужен файл с видео и встроенной звуковой дорожкой.")
+        raise ValueError("Выбери видео и отдельный аудиофайл либо видео со встроенным звуком.")
     audio = audio_streams[0]
     fps = Fraction(video.get("avg_frame_rate", "0/1"))
     duration = Fraction(video.get("duration", info["format"].get("duration", "0")))
@@ -121,11 +130,19 @@ def create_timeline(source, destination, threshold, minimum, padding):
         raise ValueError("Видео короче одного кадра.")
     video_start = float(video.get("start_time", info["format"].get("start_time", 0)))
     timecode = source_timecode(info, video, fps)
+    analysis_start = video_start
+    if external_audio:
+        analysis_start = float(audio.get("start_time", audio_info["format"].get("start_time", 0)))
+        audio_duration = Fraction(audio.get("duration", audio_info["format"].get("duration", "0")))
+        audio_frames = math.floor(audio_duration * fps)
+        if audio_frames < 1:
+            raise ValueError("Не удалось определить длительность отдельного звука.")
 
     log = run(
-        "ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-copyts", "-i", source,
+        "ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-copyts", "-i",
+        external_audio or source,
         "-map", f"0:{audio['index']}", "-vn",
-        "-af", f"asetpts=PTS-({video_start:.9f})/TB,aresample=async=1:first_pts=0,"
+        "-af", f"asetpts=PTS-({analysis_start:.9f})/TB,aresample=async=1:first_pts=0,"
                f"apad=whole_dur={float(duration):.9f},"
                f"atrim=duration={float(duration):.9f},silencedetect=n={threshold}dB:d={minimum}",
         "-f", "null", "-",
@@ -148,11 +165,16 @@ def create_timeline(source, destination, threshold, minimum, padding):
                   width=str(video["width"]), height=str(video["height"]))
     asset = ET.SubElement(
         resources, "asset", id="r2", name=source.name, start=time(timecode),
-        duration=time(frame_count), hasVideo="1", hasAudio="1", format="r1",
-        audioSources=str(len(audio_streams)), audioChannels=str(audio["channels"]),
-        audioRate=audio["sample_rate"],
+        duration=time(frame_count), hasVideo="1", format="r1",
     )
     ET.SubElement(asset, "media-rep", kind="original-media", src=source.as_uri())
+    audio_asset = asset
+    if external_audio:
+        audio_asset = ET.SubElement(resources, "asset", id="r3", name=external_audio.name,
+                                    start="0s", duration=time(audio_frames))
+        ET.SubElement(audio_asset, "media-rep", kind="original-media", src=external_audio.as_uri())
+    audio_asset.attrib.update(hasAudio="1", audioSources=str(len(audio_streams)),
+                              audioChannels=str(audio["channels"]), audioRate=audio["sample_rate"])
     event = ET.SubElement(root, "event", name="Автонарезка")
     project = ET.SubElement(event, "project", name=name)
     sequence = ET.SubElement(project, "sequence", format="r1", duration=time(total),
@@ -161,8 +183,12 @@ def create_timeline(source, destination, threshold, minimum, padding):
     offset = 0
     for start, end in clips:
         length = end - start
-        ET.SubElement(spine, "asset-clip", ref="r2", name=source.stem, offset=time(offset),
-                      start=time(timecode + start), duration=time(length))
+        clip = ET.SubElement(spine, "asset-clip", ref="r2", name=source.stem, offset=time(offset),
+                             start=time(timecode + start), duration=time(length))
+        if external_audio and start < audio_frames:
+            ET.SubElement(clip, "audio", ref="r3", name=external_audio.stem, lane="-1",
+                          offset=time(timecode + start), start=time(start),
+                          duration=time(min(end, audio_frames) - start))
         offset += length
     ET.indent(root)
     destination.write_bytes(
@@ -183,6 +209,7 @@ def gui():
     panel = ttk.Frame(root, padding=18)
     panel.grid(sticky="nsew")
     source = tk.StringVar()
+    audio_file = tk.StringVar()
     status = tk.StringVar(value="Выбери видео с речью.")
     fields = [tk.StringVar(value=value) for value in ("-35", "0.65", "0.12")]
 
@@ -191,12 +218,18 @@ def gui():
         if path:
             source.set(path)
 
+    def choose_audio():
+        path = filedialog.askopenfilename(title="Выбери отдельный звуковой файл")
+        if path:
+            audio_file.set(path)
+
     def start():
         if not source.get().strip():
             choose()
         if not source.get().strip():
             return
         path = Path(source.get())
+        audio_path = Path(audio_file.get().strip()) if audio_file.get().strip() else None
         try:
             settings = [float(field.get().replace(",", ".")) for field in fields]
         except ValueError:
@@ -213,7 +246,8 @@ def gui():
 
         def work():
             try:
-                result.put((True, create_timeline(path, Path(output), *settings)))
+                result.put((True, create_timeline(path, Path(output), *settings,
+                                                  external_audio=audio_path)))
             except (OSError, ValueError, KeyError) as exc:
                 result.put((False, str(exc)))
 
@@ -237,13 +271,17 @@ def gui():
 
     ttk.Entry(panel, textvariable=source, width=50).grid(row=0, column=0)
     ttk.Button(panel, text="Выбрать видео", command=choose).grid(row=0, column=1, padx=(8, 0))
+    ttk.Entry(panel, textvariable=audio_file, width=50).grid(row=1, column=0, pady=(8, 0))
+    ttk.Button(panel, text="Выбрать аудио", command=choose_audio).grid(row=1, column=1, pady=(8, 0))
+    ttk.Label(panel, text="Отдельное аудио. Пустое поле — звук из видео.").grid(
+        row=2, column=0, columnspan=2, sticky="w")
     labels = ("Порог тишины, дБ", "Минимальная пауза, сек.", "Запас с каждой стороны, сек.")
-    for row, (label, field) in enumerate(zip(labels, fields), start=1):
+    for row, (label, field) in enumerate(zip(labels, fields), start=3):
         ttk.Label(panel, text=label).grid(row=row, column=0, sticky="w", pady=(8, 0))
         ttk.Entry(panel, textvariable=field, width=12).grid(row=row, column=1, pady=(8, 0))
     export = ttk.Button(panel, text="Собрать таймлайн", command=start)
-    export.grid(row=4, column=0, columnspan=2, sticky="ew", pady=12)
-    ttk.Label(panel, textvariable=status, wraplength=425).grid(row=5, column=0, columnspan=2, sticky="w")
+    export.grid(row=6, column=0, columnspan=2, sticky="ew", pady=12)
+    ttk.Label(panel, textvariable=status, wraplength=425).grid(row=7, column=0, columnspan=2, sticky="w")
     root.mainloop()
 
 
@@ -254,13 +292,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("video", type=Path)
     parser.add_argument("-o", "--output", type=Path)
+    parser.add_argument("--audio", type=Path, help="Separate audio file aligned to the video start")
     parser.add_argument("--threshold", type=float, default=-35)
     parser.add_argument("--min-silence", type=float, default=0.65)
     parser.add_argument("--padding", type=float, default=0.12)
     args = parser.parse_args()
     output = args.output or args.video.with_name(f"{args.video.stem}-autocut.fcpxml")
     try:
-        print(create_timeline(args.video, output, args.threshold, args.min_silence, args.padding))
+        print(create_timeline(args.video, output, args.threshold, args.min_silence, args.padding,
+                              external_audio=args.audio))
     except (OSError, ValueError, KeyError) as exc:
         parser.exit(1, f"{exc}\n")
 
