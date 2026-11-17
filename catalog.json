@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "scripts": [
+    {
+      "id": "autocut",
+      "name": "Автонарезка по тишине",
+      "menu": "DRS - Cut silence",
+      "version": "0002-17112026",
+      "entry": "resolve_autocut.py",
+      "files": ["resolve_autocut.py"]
+    },
+    {
+      "id": "scenes",
+      "name": "Поиск склеек по смене кадра",
+      "menu": "DRS - Find scene cuts",
+      "version": "0000-17112026",
+      "entry": "resolve_scene_cuts.py",
+      "files": ["resolve_scene_cuts.py", "resolve_autocut.py"]
+    },
+    {
+      "id": "quality",
+      "name": "Проверка экспорта",
+      "menu": "DRS - Check export",
+      "version": "0000-17112026",
+      "entry": "resolve_quality_check.py",
+      "files": ["resolve_quality_check.py", "resolve_autocut.py"]
+    }
+  ]
+}

@@ -4,3 +4,5 @@ FFmpeg/
 ffmpeg.exe
 ffprobe.exe
 *.fcpxml
+build/
+dist/
