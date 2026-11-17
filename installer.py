@@ -1,5 +1,6 @@
 """Windows installer and launcher for the DaVinci Resolve scripts."""
 
+import base64
 import hashlib
 import json
 import os
@@ -11,22 +12,30 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.error
+import urllib.parse
 import urllib.request
 import winreg
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from tkinter import StringVar, BooleanVar, Tk, filedialog, messagebox, ttk
+from tkinter import StringVar, BooleanVar, Tk, filedialog, messagebox, simpledialog, ttk
 
 REPO = "https://github.com/prostoodin1/DaVinci-Resolve-Scripts.git"
+API = "https://api.github.com/repos/prostoodin1/DaVinci-Resolve-Scripts"
 APP = Path(os.environ["LOCALAPPDATA"]) / "DaVinci Resolve Scripts"
 MENU = (Path(os.environ["APPDATA"]) / "Blackmagic Design" / "DaVinci Resolve" /
         "Support" / "Fusion" / "Scripts" / "Utility")
 BUNDLE = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 FFMPEG_VERSION = "9.0.2"
 FFMPEG_ARCHIVE = f"ffmpeg-{FFMPEG_VERSION}-essentials_build"
-FFMPEG_URL = f"https://github.com/GyanD/codexffmpeg/releases/download/{FFMPEG_VERSION}/{FFMPEG_ARCHIVE}.zip"
 FFMPEG_SHA256 = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
+SPEECH_ARCHIVE = "russian-speech.zip"
+SPEECH_FILES = (
+    "feat.params", "feature_transform", "mdef", "means", "mixture_weights",
+    "noisedict", "ru.dic", "ru.lm.bin", "transition_matrices", "variances",
+    "LICENSE", "README",
+)
 ID = re.compile(r"[a-z][a-z0-9-]{0,40}")
 VERSION = re.compile(r"\d{4}-\d{8}")
 FILENAME = re.compile(r"resolve_[a-z_]+\.py")
@@ -55,7 +64,7 @@ def find_resolve():
 
 def load_catalog(folder):
     catalog = json.loads((folder / "catalog.json").read_text(encoding="utf-8"))
-    if catalog.get("schema") != 1:
+    if catalog.get("schema") not in (1, 2):
         raise ValueError("Обнови установщик для нового формата каталога.")
     seen_ids = set()
     seen_menus = set()
@@ -95,40 +104,70 @@ def atomic_write(path, content):
             temporary.unlink(missing_ok=True)
 
 
+def atomic_copy(path, source):
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        try:
+            shutil.copyfileobj(source, handle)
+            handle.close()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def setup_ffmpeg(app=APP, progress=lambda text: None):
-    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
-        return None
     destination = app / "FFmpeg" / "bin"
     names = ("ffmpeg.exe", "ffprobe.exe")
     if all((destination / name).is_file() for name in names):
         return destination
-    progress("Скачиваю FFmpeg. Размер архива около 115 МБ…")
-    with tempfile.TemporaryDirectory() as temporary:
-        archive = Path(temporary) / "ffmpeg.zip"
-        with urllib.request.urlopen(FFMPEG_URL, timeout=45) as response, archive.open("wb") as handle:
-            shutil.copyfileobj(response, handle)
-        with archive.open("rb") as handle:
-            if hashlib.file_digest(handle, "sha256").hexdigest() != FFMPEG_SHA256:
-                raise ValueError("Скачанный архив FFmpeg не прошёл проверку SHA-256.")
-        destination.mkdir(parents=True, exist_ok=True)
-        with zipfile.ZipFile(archive) as package:
-            for name in names:
-                with package.open(f"{FFMPEG_ARCHIVE}/bin/{name}") as binary:
-                    with tempfile.NamedTemporaryFile(dir=destination, delete=False) as handle:
-                        path = Path(handle.name)
-                        try:
-                            shutil.copyfileobj(binary, handle)
-                            handle.close()
-                            os.replace(path, destination / name)
-                        finally:
-                            path.unlink(missing_ok=True)
+    archive = BUNDLE / "ffmpeg.zip"
+    if not archive.is_file():
+        raise ValueError("FFmpeg отсутствует. Запусти полный ResolveScriptsSetup.exe для восстановления.")
+    progress("Распаковываю FFmpeg из установщика…")
+    with archive.open("rb") as handle:
+        if hashlib.file_digest(handle, "sha256").hexdigest() != FFMPEG_SHA256:
+            raise ValueError("Архив FFmpeg в установщике не прошёл проверку SHA-256.")
+    destination.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as package:
+        for name in ("LICENSE", "README.txt"):
+            atomic_write(destination.parent / name, package.read(f"{FFMPEG_ARCHIVE}/{name}"))
+        for name in names:
+            with package.open(f"{FFMPEG_ARCHIVE}/bin/{name}") as binary:
+                atomic_copy(destination / name, binary)
     return destination
 
 
-def fetch_catalog(destination):
-    git = shutil.which("git") or str(Path(os.environ["ProgramFiles"]) / "Git" / "cmd" / "git.exe")
-    if not Path(git).is_file():
-        raise ValueError("Для обновления из приватного GitHub установи Git for Windows с Git Credential Manager.")
+def setup_speech(app, requested, progress):
+    archive = app / SPEECH_ARCHIVE
+    bundled = BUNDLE / SPEECH_ARCHIVE
+    destination = app / "SpeechRussian"
+    if not archive.is_file() and bundled.is_file():
+        progress("Сохраняю русский речевой пакет для офлайн-установки…")
+        with bundled.open("rb") as source:
+            atomic_copy(archive, source)
+    if not requested or all((destination / name).is_file() for name in SPEECH_FILES):
+        return
+    if not archive.is_file():
+        raise ValueError("Нет русского речевого пакета. Запусти полный ResolveScriptsSetup.exe.")
+    progress("Распаковываю русский речевой пакет…")
+    destination.mkdir(exist_ok=True)
+    with zipfile.ZipFile(archive) as model:
+        for name in SPEECH_FILES:
+            with model.open(name) as source:
+                atomic_copy(destination / name, source)
+
+
+def find_git():
+    installed = Path(os.environ["ProgramFiles"]) / "Git" / "cmd" / "git.exe"
+    return shutil.which("git") or (str(installed) if installed.is_file() else None)
+
+
+def fetch_catalog(destination, token=None):
+    if token:
+        return fetch_catalog_api(destination, token)
+    git = find_git()
+    if not git:
+        return fetch_catalog_api(destination, None)
     result = subprocess.run(
         [git, "clone", "--quiet", "--depth", "1", "--branch", "main", REPO, str(destination)],
         capture_output=True, encoding="utf-8", errors="replace",
@@ -136,8 +175,47 @@ def fetch_catalog(destination):
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     if result.returncode:
-        raise ValueError("GitHub недоступен. Войди в аккаунт с доступом к репозиторию через "
-                         "Git Credential Manager.\n\n" + result.stderr.strip()[-700:])
+        raise ValueError("GitHub недоступен через сохранённый вход. Используй «Войти по токену» "
+                         "или проверь вход в Git Credential Manager.")
+    return load_catalog(destination)
+
+
+def fetch_catalog_api(destination, token):
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "DaVinci-Resolve-Scripts"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    def api(path):
+        request = urllib.request.Request(API + path, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403, 404):
+                raise ValueError("Для приватного каталога нажми «Войти по токену» и укажи "
+                                 "токен GitHub с доступом Contents: Read к репозиторию.") from None
+            raise
+
+    revision = api("/commits/main")["sha"]
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("GitHub вернул неверный идентификатор коммита.")
+
+    def contents(filename):
+        item = api(f"/contents/{urllib.parse.quote(filename)}?ref={revision}")
+        if item["encoding"] != "base64":
+            raise ValueError(f"Неподдерживаемый формат файла {filename}.")
+        return base64.b64decode(item["content"])
+
+    catalog_file = contents("catalog.json")
+    catalog = json.loads(catalog_file)
+    if catalog.get("schema") not in (1, 2):
+        raise ValueError("Обнови установщик для нового формата каталога.")
+    names = {name for item in catalog["scripts"] for name in item["files"]}
+    if any(not FILENAME.fullmatch(name) for name in names):
+        raise ValueError("В каталоге GitHub указан неверный путь к скрипту.")
+    (destination / "catalog.json").write_bytes(catalog_file)
+    for name in names:
+        (destination / name).write_bytes(contents(name))
     return load_catalog(destination)
 
 
@@ -145,6 +223,7 @@ def install(selected, folder, launcher, app=APP, menu=MENU, progress=lambda text
     app.mkdir(parents=True, exist_ok=True)
     menu.mkdir(parents=True, exist_ok=True)
     setup_ffmpeg(app, progress)
+    setup_speech(app, any(item["id"] == "subtitles" for item in selected), progress)
     persistent_launcher = app / "ResolveScripts.exe"
     if launcher.resolve() != persistent_launcher.resolve():
         if not persistent_launcher.exists() or persistent_launcher.read_bytes() != launcher.read_bytes():
@@ -197,6 +276,9 @@ def launch(identifier, version, arguments=()):
     ffmpeg = APP / "FFmpeg" / "bin"
     if ffmpeg.is_dir():
         os.environ["FFMPEG_DIR"] = str(ffmpeg)
+    speech = APP / "SpeechRussian"
+    if speech.is_dir():
+        os.environ["DRS_SPEECH_RU"] = str(speech)
     sys.path.insert(0, str(folder))
     sys.argv = [str(folder / entry), *arguments]
     runpy.run_path(sys.argv[0], run_name="__main__")
@@ -240,7 +322,7 @@ def gui():
 
     def background(job, success):
         results = queue.SimpleQueue()
-        for button in (apply_button, update_button, choose_button):
+        for button in (apply_button, update_button, choose_button, token_button):
             button.state(["disabled"])
 
         def execute():
@@ -261,7 +343,7 @@ def gui():
                 status.set(value)
                 root.after(1, poll)
                 return
-            for button in (apply_button, update_button, choose_button):
+            for button in (apply_button, update_button, choose_button, token_button):
                 button.state(["!disabled"])
             if state == "error":
                 status.set("Операция прервана.")
@@ -272,6 +354,20 @@ def gui():
         threading.Thread(target=execute, daemon=True).start()
         root.after(120, poll)
 
+    token = None
+
+    def enter_token():
+        nonlocal token
+        value = simpledialog.askstring(
+            "Доступ к приватному GitHub",
+            "Токен GitHub с доступом Contents: Read к репозиторию.\n"
+            "Токен используется до закрытия этого окна.",
+            show="*", parent=root,
+        )
+        if value and value.strip():
+            token = value.strip()
+            check()
+
     def check():
         selected = {item["id"] for item, choice in rows if choice.get()}
         selected.update(item["id"] for item, _ in rows if installed_version(item["id"]))
@@ -279,7 +375,7 @@ def gui():
         def download(progress):
             progress("Проверяю каталог в GitHub…")
             path = Path(tempfile.mkdtemp(dir=temporary.name))
-            return path, fetch_catalog(path)
+            return path, fetch_catalog(path, token)
 
         def loaded(result):
             nonlocal folder
@@ -308,7 +404,9 @@ def gui():
             render([item for item, _ in rows], {item["id"] for item in selected})
             status.set("Готово. Перезапусти Resolve и открой Workspace → Scripts.")
 
-        background(lambda progress: install(selected, folder, Path(sys.executable), progress=progress), complete)
+        runtime = BUNDLE / "ResolveScriptsRuntime.exe"
+        launcher = runtime if runtime.is_file() else Path(sys.executable)
+        background(lambda progress: install(selected, folder, launcher, progress=progress), complete)
 
     ttk.Label(panel, text="DaVinci Resolve").pack(anchor="w")
     path_row = ttk.Frame(panel)
@@ -321,6 +419,8 @@ def gui():
     actions.pack(fill="x", pady=(12, 8))
     update_button = ttk.Button(actions, text="Проверить GitHub", command=check)
     update_button.pack(side="left")
+    token_button = ttk.Button(actions, text="Войти по токену", command=enter_token)
+    token_button.pack(side="left", padx=(6, 0))
     apply_button = ttk.Button(actions, text="Установить / обновить выбранные", command=apply)
     apply_button.pack(side="right")
     ttk.Label(panel, textvariable=status, wraplength=580).pack(anchor="w")

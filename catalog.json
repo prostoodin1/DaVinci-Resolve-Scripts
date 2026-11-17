@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "scripts": [
     {
       "id": "autocut",
@@ -24,6 +24,30 @@
       "version": "0000-17112026",
       "entry": "resolve_quality_check.py",
       "files": ["resolve_quality_check.py", "resolve_autocut.py"]
+    },
+    {
+      "id": "audio-sync",
+      "name": "Синхронизация микрофона",
+      "menu": "DRS - Sync microphone",
+      "version": "0000-18112026",
+      "entry": "resolve_audio_sync.py",
+      "files": ["resolve_audio_sync.py", "resolve_autocut.py"]
+    },
+    {
+      "id": "subtitles",
+      "name": "Речь в субтитры (офлайн)",
+      "menu": "DRS - Speech to subtitles",
+      "version": "0000-18112026",
+      "entry": "resolve_subtitles.py",
+      "files": ["resolve_subtitles.py", "resolve_autocut.py"]
+    },
+    {
+      "id": "phrase-search",
+      "name": "Поиск фразы по субтитрам",
+      "menu": "DRS - Find phrase",
+      "version": "0000-18112026",
+      "entry": "resolve_phrase_search.py",
+      "files": ["resolve_phrase_search.py"]
     }
   ]
 }
