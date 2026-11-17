@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+FFmpeg/
+ffmpeg.exe
+ffprobe.exe
+*.fcpxml
