@@ -150,7 +150,16 @@ def create_timeline(source, destination, threshold, minimum, padding, external_a
     clips = keep_ranges(log, fps, frame_count, Fraction(str(padding)))
     if not clips:
         raise ValueError("Всё видео тише порога. Попробуй уменьшить порог, например до −45 дБ.")
+    write_timeline(source, destination, video, fps, frame_count, timecode,
+                   audio_streams, clips, "автонарезка", external_audio,
+                   audio_frames if external_audio else None)
+    total = sum(end - start for start, end in clips)
+    removed = float((frame_count - total) / fps)
+    return f"Клипов: {len(clips)}. Вырезано: {removed:.2f} сек."
 
+
+def write_timeline(source, destination, video, fps, frame_count, timecode,
+                   audio_streams, clips, label, external_audio=None, audio_frames=None):
     def time(frames):
         seconds = frames / fps
         if seconds.denominator == 1:
@@ -158,7 +167,7 @@ def create_timeline(source, destination, threshold, minimum, padding, external_a
         return f"{seconds.numerator}/{seconds.denominator}s"
 
     total = sum(end - start for start, end in clips)
-    name = f"{source.stem} — автонарезка"
+    name = f"{source.stem} — {label}"
     root = ET.Element("fcpxml", version="1.9")
     resources = ET.SubElement(root, "resources")
     ET.SubElement(resources, "format", id="r1", frameDuration=time(1),
@@ -173,9 +182,11 @@ def create_timeline(source, destination, threshold, minimum, padding, external_a
         audio_asset = ET.SubElement(resources, "asset", id="r3", name=external_audio.name,
                                     start="0s", duration=time(audio_frames))
         ET.SubElement(audio_asset, "media-rep", kind="original-media", src=external_audio.as_uri())
-    audio_asset.attrib.update(hasAudio="1", audioSources=str(len(audio_streams)),
-                              audioChannels=str(audio["channels"]), audioRate=audio["sample_rate"])
-    event = ET.SubElement(root, "event", name="Автонарезка")
+    if audio_streams:
+        audio = audio_streams[0]
+        audio_asset.attrib.update(hasAudio="1", audioSources=str(len(audio_streams)),
+                                  audioChannels=str(audio["channels"]), audioRate=audio["sample_rate"])
+    event = ET.SubElement(root, "event", name=label)
     project = ET.SubElement(event, "project", name=name)
     sequence = ET.SubElement(project, "sequence", format="r1", duration=time(total),
                              tcStart="0s", tcFormat="NDF")
@@ -195,8 +206,6 @@ def create_timeline(source, destination, threshold, minimum, padding, external_a
         b'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE fcpxml>\n'
         + ET.tostring(root, encoding="utf-8") + b"\n"
     )
-    removed = float((frame_count - total) / fps)
-    return f"Клипов: {len(clips)}. Вырезано: {removed:.2f} сек."
 
 
 def gui():
