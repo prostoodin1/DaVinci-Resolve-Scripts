@@ -79,6 +79,14 @@ python resolve_subtitles.py "video.mp4" --language ru -o "video.srt"
 python resolve_phrase_search.py "video.srt" "сейчас покажу"
 ```
 
+## Поиск повторных дублей
+
+Открой **DRS - Find repeated takes** и выбери SRT исходной записи. CSV покажет группы похожих фраз с таймкодами и процентом сходства с фразой, взятой за образец. Скрипт сравнивает формулировки офлайн, учитывает небольшие различия и фразы, разделённые между двумя близкими репликами. По умолчанию ищет фразы от пяти слов при сходстве от 80%. Проверь дубли по видео перед выбором.
+
+```powershell
+python resolve_repeated_takes.py "recording.srt" --threshold 80 --min-words 5
+```
+
 ## Сборка установщика
 
 Для сборки нужны Python 3.13, PyInstaller, NumPy и PocketSphinx 5.1.1. Скачай исходный [архив Gyan FFmpeg Essentials 9.0.2](https://github.com/GyanD/codexffmpeg/releases/tag/9.0.2) и распакуй [русскую модель CMUSphinx 5.2](https://sourceforge.net/projects/cmusphinx/files/Acoustic%20and%20Language%20Models/Russian/cmusphinx-ru-5.2.tar.gz/download). Сохрани файл LICENSE из [каталога русской модели](https://sourceforge.net/projects/cmusphinx/files/Acoustic%20and%20Language%20Models/Russian/) в папку с распакованной моделью.

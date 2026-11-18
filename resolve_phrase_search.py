@@ -22,14 +22,8 @@ def words(text):
     return re.findall(r"[^\W_]+", text)
 
 
-def find_phrases(source, phrase):
-    match = words(phrase)
-    if not match:
-        raise ValueError("Введи слово или фразу.")
+def read_cues(source):
     content = source.read_text(encoding="utf-8-sig")
-    history = deque(maxlen=len(match))
-    result = []
-    last_end = 0
     for block in re.split(r"\n[ \t]*\n+", content.strip()):
         lines = block.splitlines()
         for index, line in enumerate(lines):
@@ -39,11 +33,21 @@ def find_phrases(source, phrase):
         else:
             continue
         start, end = timing.groups()
+        text = " ".join(lines[index + 1:])
+        yield start, end, html.unescape(re.sub(r"<[^>]*>|\{\\[^}]*\}", "", text))
+
+
+def find_phrases(source, phrase):
+    match = words(phrase)
+    if not match:
+        raise ValueError("Введи слово или фразу.")
+    history = deque(maxlen=len(match))
+    result = []
+    last_end = 0
+    for start, end, plain in read_cues(source):
         if milliseconds(start) - last_end > 1000 or milliseconds(end) < last_end:
             history.clear()
         last_end = milliseconds(end)
-        text = " ".join(lines[index + 1:])
-        plain = html.unescape(re.sub(r"<[^>]*>|\{\\[^}]*\}", "", text))
         for word in words(plain):
             history.append((word, start, end, plain))
             if len(history) == len(match) and [item[0] for item in history] == match:
@@ -51,6 +55,10 @@ def find_phrases(source, phrase):
                 if not result or result[-1] != hit:
                     result.append(hit)
     return result
+
+
+def csv_text(text):
+    return "'" + text if text.lstrip().startswith(("=", "+", "-", "@")) else text
 
 
 def write_matches(source, phrase, destination):
@@ -61,8 +69,7 @@ def write_matches(source, phrase, destination):
     with destination.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle, delimiter=";")
         writer.writerow(("Начало субтитра", "Конец субтитра", "Текст"))
-        writer.writerows((start, end, "'" + text if text.lstrip().startswith(("=", "+", "-", "@"))
-                         else text) for start, end, text in matches)
+        writer.writerows((start, end, csv_text(text)) for start, end, text in matches)
     return matches
 
 

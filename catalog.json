@@ -45,9 +45,17 @@
       "id": "phrase-search",
       "name": "Поиск фразы по субтитрам",
       "menu": "DRS - Find phrase",
-      "version": "0000-18112026",
+      "version": "0001-18112026",
       "entry": "resolve_phrase_search.py",
       "files": ["resolve_phrase_search.py"]
+    },
+    {
+      "id": "repeated-takes",
+      "name": "Поиск повторных дублей",
+      "menu": "DRS - Find repeated takes",
+      "version": "0000-18112026",
+      "entry": "resolve_repeated_takes.py",
+      "files": ["resolve_repeated_takes.py", "resolve_phrase_search.py"]
     }
   ]
 }
