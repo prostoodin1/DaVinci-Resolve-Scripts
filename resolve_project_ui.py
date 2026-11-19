@@ -25,6 +25,20 @@ class ProjectClip:
     has_video: bool
 
 
+def media_flags(properties):
+    """Use stream metadata, with the Media Pool type as a fallback."""
+    kind = str(properties.get("Type", "")).casefold()
+    channels = re.match(r"\s*(\d+)", str(properties.get("Audio Ch", "")))
+    audio_codec = str(properties.get("Audio Codec", "") or "").strip().casefold()
+    video_codec = str(properties.get("Video Codec", "") or "").strip().casefold()
+    audio = audio_codec not in ("", "none", "n/a", "unknown", "0")
+    audio = audio or bool(channels and int(channels[1]) > 0) or "audio" in kind
+    video = video_codec not in ("", "none", "n/a", "unknown", "0") or "video" in kind
+    if "still" in kind:
+        video = False
+    return audio, video
+
+
 def connect():
     modules = Path(os.environ.get("RESOLVE_SCRIPT_API",
                    str(Path(os.environ["PROGRAMDATA"]) / "Blackmagic Design" /
@@ -60,11 +74,10 @@ def project_clips(project):
             if not path:
                 continue
             kind = properties.get("Type", "")
+            audio, video = media_flags(properties)
             clips.append(ProjectClip(
                 item.GetName(), Path(path), name, kind, properties.get("Duration", ""),
-                item.GetMediaId() in chosen, bool(properties.get("Audio Codec", ""))
-                or str(properties.get("Audio Ch", "0")) not in ("", "0"),
-                bool(properties.get("Video Codec", "")) or "Video" in kind,
+                item.GetMediaId() in chosen, audio, video,
             ))
     return clips
 
@@ -112,29 +125,43 @@ class ProjectTool:
         self.busy = False
         title, action, primary = TOOLS[kind]
         root.title(title + " · DaVinci Resolve")
-        root.geometry("1040x700")
-        root.minsize(860, 580)
-        root.configure(bg="#151719")
+        root.geometry("1180x740")
+        root.minsize(1000, 620)
+        root.configure(bg="#242424")
         style = ttk.Style(root)
         style.theme_use("clam")
-        style.configure(".", background="#151719", foreground="#eef0f2", font=("Segoe UI", 10))
-        style.configure("TFrame", background="#151719")
-        style.configure("TLabel", background="#151719")
-        style.configure("Title.TLabel", font=("Segoe UI", 24, "bold"))
-        style.configure("Muted.TLabel", foreground="#a5adb5")
-        style.configure("TButton", padding=(16, 9), background="#30363c", borderwidth=0)
-        style.map("TButton", background=[("active", "#404951"), ("disabled", "#24282d")])
-        style.configure("Accent.TButton", background="#386ce8", foreground="white")
-        style.map("Accent.TButton", background=[("active", "#4b7df1"), ("disabled", "#30363c")])
-        style.configure("Treeview", background="#202428", fieldbackground="#202428",
-                        foreground="#eef0f2", rowheight=34, borderwidth=0)
-        style.map("Treeview", background=[("selected", "#335ca1")],
-                  foreground=[("selected", "white")])
-        style.configure("Treeview.Heading", background="#2b3036", foreground="#bfc7cf", padding=8)
-        style.configure("TEntry", fieldbackground="#252b30", foreground="white", padding=7)
-        style.configure("TCombobox", fieldbackground="#252b30", foreground="white", padding=7)
-        style.map("TCombobox", fieldbackground=[("readonly", "#252b30")],
-                  foreground=[("readonly", "white")])
+        style.configure(".", background="#242424", foreground="#e8e8e8", font=("Segoe UI", 10))
+        style.configure("TFrame", background="#242424")
+        style.configure("TLabel", background="#242424")
+        style.configure("Title.TLabel", font=("Segoe UI", 21, "bold"))
+        style.configure("Muted.TLabel", foreground="#a6a6a6")
+        style.configure("Selection.TLabel", foreground="#ef9b55", font=("Segoe UI", 10))
+        style.configure("TButton", padding=(16, 9), background="#383838", borderwidth=0)
+        style.map("TButton", background=[("active", "#484848"), ("disabled", "#2d2d2d")],
+                  foreground=[("disabled", "#777777")])
+        style.configure("Accent.TButton", background="#ec8b3c", foreground="#202020")
+        style.map("Accent.TButton", background=[("active", "#ffa255"), ("disabled", "#383838")],
+                  foreground=[("disabled", "#777777")])
+        style.configure("Treeview", background="#2b2b2b", fieldbackground="#2b2b2b",
+                        foreground="#dddddd", rowheight=44, borderwidth=0)
+        style.map("Treeview", background=[("selected", "#3a3a3a")],
+                  foreground=[("selected", "#ffffff")])
+        style.configure("Treeview.Heading", background="#323232", foreground="#aaaaaa",
+                        padding=(8, 12), relief="flat")
+        style.map("Treeview.Heading", background=[("active", "#3a3a3a")])
+        style.configure("TEntry", fieldbackground="#303030", foreground="#eeeeee", padding=8,
+                        bordercolor="#444444", insertcolor="#ec8b3c")
+        style.configure("TCombobox", fieldbackground="#303030", foreground="#eeeeee", padding=7)
+        style.map("TCombobox", fieldbackground=[("readonly", "#303030")],
+                  foreground=[("readonly", "#eeeeee")])
+        style.configure("Horizontal.TProgressbar", background="#ec8b3c", troughcolor="#333333",
+                        borderwidth=0, thickness=4)
+        style.configure("TScrollbar", background="#4a4a4a", troughcolor="#2b2b2b",
+                        borderwidth=0, arrowsize=12)
+        self.dots = (self.dot(False), self.dot(True))
+        self.selection_labels = {}
+        self.filters = {}
+        self.chosen = {}
 
         panel = ttk.Frame(root, padding=26)
         panel.pack(fill="both", expand=True)
@@ -143,25 +170,21 @@ class ProjectTool:
         ttk.Label(panel, textvariable=self.heading, style="Muted.TLabel").pack(anchor="w", pady=(6, 18))
         toolbar = ttk.Frame(panel)
         toolbar.pack(fill="x", pady=(0, 12))
-        self.search = tk.StringVar()
-        ttk.Label(toolbar, text="Поиск в проекте").pack(side="left", padx=(0, 12))
-        self.search_entry = ttk.Entry(toolbar, textvariable=self.search, width=34)
-        self.search_entry.pack(side="left")
+        ttk.Label(toolbar, text="МЕДИА ПРОЕКТА", style="Muted.TLabel").pack(side="left")
         self.refresh = ttk.Button(toolbar, text="Обновить проект", command=self.load)
         self.refresh.pack(side="right")
-        self.search.trace_add("write", lambda *_: self.populate())
         tables = ttk.Panedwindow(panel, orient="horizontal")
         tables.pack(fill="both", expand=True)
         self.primary = self.table(tables, primary)
         self.secondary = None
         if kind in ("audio-sync", "autocut"):
-            caption = "Запись микрофона" if kind == "audio-sync" else "Звук для анализа"
+            caption = "Аудио для синхронизации" if kind == "audio-sync" else "Звук для анализа"
             self.secondary = self.table(tables, caption)
             if kind == "autocut":
                 ttk.Label(panel, text="Звук из видео используется, пока справа не выбрана другая запись.",
                           style="Muted.TLabel").pack(anchor="w", pady=(10, 0))
                 self.clear_audio = ttk.Button(panel, text="Использовать звук видео",
-                    command=lambda: self.secondary.selection_remove(self.secondary.selection()))
+                    command=self.use_camera_audio)
                 self.clear_audio.pack(anchor="w", pady=(4, 0))
         self.settings = {}
         options = ttk.Frame(panel)
@@ -199,44 +222,95 @@ class ProjectTool:
         self.settings[name] = variable
         ttk.Entry(parent, textvariable=variable, width=7).pack(side="left", padx=(0, 18))
 
+    def dot(self, selected):
+        image = tk.PhotoImage(master=self.root, width=18, height=18)
+        for y in range(18):
+            for x in range(18):
+                radius = ((x - 8.5) ** 2 + (y - 8.5) ** 2) ** 0.5
+                if 5.5 <= radius <= 7:
+                    image.put("#ec8b3c" if selected else "#686868", (x, y))
+                elif selected and radius < 3.6:
+                    image.put("#ec8b3c", (x, y))
+        return image
+
+    def selected(self, tree):
+        selection = tree.selection()
+        if selection:
+            self.chosen[tree] = selection[0]
+        chosen = self.chosen.get(tree)
+        for item in tree.get_children():
+            tree.item(item, image=self.dots[int(item == chosen)])
+        if chosen is not None and int(chosen) < len(self.clips):
+            clip = self.clips[int(chosen)]
+            self.selection_labels[tree].set("●  " + clip.name)
+        else:
+            self.selection_labels[tree].set("Клип не выбран")
+
+    def use_camera_audio(self):
+        self.chosen.pop(self.secondary, None)
+        self.secondary.selection_remove(self.secondary.selection())
+        self.selected(self.secondary)
+
     def table(self, parent, caption):
         frame = ttk.Frame(parent, padding=(0, 0, 12, 0))
         parent.add(frame, weight=1)
         ttk.Label(frame, text=caption, font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
+        search = tk.StringVar()
+        search_row = ttk.Frame(frame)
+        search_row.pack(fill="x", pady=(0, 10))
+        ttk.Label(search_row, text="Поиск", style="Muted.TLabel").pack(side="left", padx=(0, 10))
+        ttk.Entry(search_row, textvariable=search).pack(side="left", fill="x", expand=True)
         wrapper = ttk.Frame(frame)
         wrapper.pack(fill="both", expand=True)
-        tree = ttk.Treeview(wrapper, columns=("name", "duration", "folder"),
-                           show="headings", selectmode="browse")
-        for name, label, width in (("name", "Клип", 250), ("duration", "Длина", 85),
-                                    ("folder", "Папка проекта", 110)):
+        tree = ttk.Treeview(wrapper, columns=("name", "type", "duration"),
+                           show="tree headings", selectmode="browse")
+        tree.column("#0", width=34, minwidth=34, stretch=False)
+        tree.heading("#0", text="")
+        for name, label, width in (("name", "Клип", 270), ("type", "Содержимое", 130),
+                                    ("duration", "Длина", 88)):
             tree.heading(name, text=label)
-            tree.column(name, width=width, minwidth=70)
+            tree.column(name, width=width, minwidth=70, stretch=name == "name")
         bar = ttk.Scrollbar(wrapper, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=bar.set)
         bar.pack(side="right", fill="y")
         tree.pack(side="left", fill="both", expand=True)
         tree.tag_configure("offline", foreground="#d28d88")
+        summary = tk.StringVar(value="Клип не выбран")
+        ttk.Label(frame, textvariable=summary, style="Selection.TLabel",
+                  wraplength=480).pack(anchor="w", pady=(12, 0))
+        self.selection_labels[tree] = summary
+        self.filters[tree] = search
+        search.trace_add("write", lambda *_: self.populate(tree))
+        tree.bind("<<TreeviewSelect>>", lambda event: self.selected(tree))
         return tree
 
-    def populate(self):
-        query = self.search.get().casefold()
-        for tree in (self.primary, self.secondary):
+    def populate(self, only=None):
+        for tree in ((only,) if only is not None else (self.primary, self.secondary)):
             if tree is None:
                 continue
-            selected = set(tree.selection())
+            query = self.filters[tree].get().casefold()
+            selected = self.chosen.get(tree)
             tree.delete(*tree.get_children())
             for index, clip in enumerate(self.clips):
                 allowed = clip.has_audio if tree is self.secondary else (
                     clip.has_video if self.kind != "subtitles" else clip.has_audio)
+                if self.kind == "audio-sync" and tree is self.primary:
+                    allowed = clip.has_video and clip.has_audio
                 if not allowed or query not in (clip.name + " " + clip.folder).casefold():
                     continue
                 offline = not clip.path.is_file()
+                media_type = "Видео + звук" if clip.has_video and clip.has_audio else (
+                    "Видео" if clip.has_video else "Аудио")
+                if tree is self.secondary and clip.has_video:
+                    media_type = "Звук из видео"
                 item = tree.insert("", "end", iid=str(index),
+                                   image=self.dots[int(str(index) == selected)],
                                    values=(clip.name + (" · офлайн" if offline else ""),
-                                           clip.duration, clip.folder),
+                                           media_type, clip.duration),
                                    tags=("offline",) if offline else ())
-                if str(index) in selected:
+                if str(index) == selected:
                     tree.selection_set(item)
+            self.selected(tree)
 
     def load(self):
         if self.busy:
@@ -245,16 +319,21 @@ class ProjectTool:
             self.resolve, self.project = connect()
             self.project_id = self.project.GetUniqueId()
             self.clips = project_clips(self.project)
+            self.chosen.clear()
             self.heading.set(f"Проект «{self.project.GetName()}» · клипов в Media Pool: {len(self.clips)}")
             self.populate()
             selected = [str(i) for i, clip in enumerate(self.clips) if clip.selected]
             video = next((i for i in selected if self.primary.exists(i)), None)
             if video:
                 self.primary.selection_set(video)
+                self.selected(self.primary)
             if self.secondary:
-                audio = next((i for i in selected if i != video and self.secondary.exists(i)), None)
+                candidates = [i for i in selected if i != video and self.secondary.exists(i)]
+                audio = next((i for i in candidates if not self.clips[int(i)].has_video),
+                             next(iter(candidates), None))
                 if audio:
                     self.secondary.selection_set(audio)
+                    self.selected(self.secondary)
             self.status.set("Выбери клипы из проекта." if self.clips else "В Media Pool нет исходных клипов.")
             self.button.state(["!disabled"])
         except Exception as exc:
@@ -269,14 +348,14 @@ class ProjectTool:
             self.load()
             self.status.set("Проект изменился. Выбери клипы из обновлённого списка.")
             return
-        selected = self.primary.selection()
-        sound = self.secondary.selection() if self.secondary else ()
+        selected = self.chosen.get(self.primary)
+        sound = self.chosen.get(self.secondary)
         if not selected or (self.kind == "audio-sync" and not sound):
             self.status.set("Выбери видео слева и микрофон справа." if self.secondary
                             else "Выбери клип из списка.")
             return
-        source = self.clips[int(selected[0])]
-        audio = self.clips[int(sound[0])] if sound else None
+        source = self.clips[int(selected)]
+        audio = self.clips[int(sound)] if sound else None
         if audio and audio.path == source.path:
             self.status.set("Для отдельной записи выбери другой клип справа.")
             return
