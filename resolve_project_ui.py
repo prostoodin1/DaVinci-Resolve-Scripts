@@ -125,8 +125,9 @@ class ProjectTool:
         self.busy = False
         title, action, primary = TOOLS[kind]
         root.title(title + " · DaVinci Resolve")
-        root.geometry("1180x740")
-        root.minsize(1000, 620)
+        height = max(560, min(940, root.winfo_screenheight() - 100))
+        root.geometry(f"760x{height}")
+        root.minsize(640, min(620, height))
         root.configure(bg="#242424")
         style = ttk.Style(root)
         style.theme_use("clam")
@@ -173,21 +174,39 @@ class ProjectTool:
         ttk.Label(toolbar, text="МЕДИА ПРОЕКТА", style="Muted.TLabel").pack(side="left")
         self.refresh = ttk.Button(toolbar, text="Обновить проект", command=self.load)
         self.refresh.pack(side="right")
-        tables = ttk.Panedwindow(panel, orient="horizontal")
-        tables.pack(fill="both", expand=True)
+        controls = ttk.Frame(panel)
+        controls.pack(side="bottom", fill="x", pady=(14, 0))
+        browser = ttk.Frame(panel)
+        browser.pack(fill="both", expand=True)
+        canvas = tk.Canvas(browser, bg="#242424", highlightthickness=0, height=1)
+        scroll = ttk.Scrollbar(browser, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        tables = ttk.Panedwindow(canvas, orient="vertical")
+        content = canvas.create_window((0, 0), window=tables, anchor="nw")
+        content_height = 620 if kind in ("audio-sync", "autocut") else 300
+
+        def resize_browser(event):
+            height = max(event.height, content_height)
+            canvas.itemconfigure(content, width=event.width, height=height)
+            canvas.configure(scrollregion=(0, 0, event.width, height))
+
+        canvas.bind("<Configure>", resize_browser)
+        canvas.bind("<MouseWheel>", lambda event: canvas.yview_scroll(-int(event.delta / 120), "units"))
         self.primary = self.table(tables, primary)
         self.secondary = None
         if kind in ("audio-sync", "autocut"):
             caption = "Аудио для синхронизации" if kind == "audio-sync" else "Звук для анализа"
             self.secondary = self.table(tables, caption)
             if kind == "autocut":
-                ttk.Label(panel, text="Звук из видео используется, пока справа не выбрана другая запись.",
-                          style="Muted.TLabel").pack(anchor="w", pady=(10, 0))
-                self.clear_audio = ttk.Button(panel, text="Использовать звук видео",
+                ttk.Label(controls, text="Можно использовать звук видео или выбрать отдельную запись ниже.",
+                          style="Muted.TLabel", wraplength=640).pack(anchor="w", pady=(0, 6))
+                self.clear_audio = ttk.Button(controls, text="Использовать звук видео",
                     command=self.use_camera_audio)
                 self.clear_audio.pack(anchor="w", pady=(4, 0))
         self.settings = {}
-        options = ttk.Frame(panel)
+        options = ttk.Frame(controls)
         options.pack(fill="x", pady=(18, 4))
         if kind in ("autocut", "scenes"):
             self.setting(options, "Порог, дБ" if kind == "autocut" else "Порог смены кадра",
@@ -201,18 +220,23 @@ class ProjectTool:
             ttk.Combobox(options, textvariable=self.settings["language"], values=("ru", "en"),
                          state="readonly", width=8).pack(side="left")
         self.status = tk.StringVar(value="Выбери клипы из проекта.")
-        ttk.Label(panel, textvariable=self.status, wraplength=960).pack(anchor="w", pady=(8, 10))
-        footer = ttk.Frame(panel)
+        ttk.Label(controls, textvariable=self.status, wraplength=650).pack(anchor="w", pady=(8, 10))
+        footer = ttk.Frame(controls)
         footer.pack(fill="x")
         self.progress = ttk.Progressbar(footer, mode="indeterminate")
-        self.progress.pack(side="left", fill="x", expand=True, padx=(0, 18))
+        self.progress.pack(fill="x", pady=(0, 12))
         self.result_folder = None
         self.open_result = ttk.Button(footer, text="Результат",
                                      command=lambda: os.startfile(self.result_folder))
-        self.open_result.pack(side="right", padx=(8, 0))
+        self.open_result.pack(side="bottom", fill="x", pady=(8, 0))
         self.open_result.state(["disabled"])
-        self.button = ttk.Button(footer, text=action, style="Accent.TButton", command=self.start)
-        self.button.pack(side="right")
+        confirmation = {"audio-sync": "Подтвердить и синхронизировать",
+                        "autocut": "Подтвердить и собрать таймлайн",
+                        "scenes": "Подтвердить и найти склейки",
+                        "quality": "Подтвердить и проверить",
+                        "subtitles": "Подтвердить и распознать речь"}[kind]
+        self.button = ttk.Button(footer, text=confirmation, style="Accent.TButton", command=self.start)
+        self.button.pack(fill="x")
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(100, self.load)
 
@@ -252,7 +276,7 @@ class ProjectTool:
         self.selected(self.secondary)
 
     def table(self, parent, caption):
-        frame = ttk.Frame(parent, padding=(0, 0, 12, 0))
+        frame = ttk.Frame(parent, padding=(0, 6, 0, 12))
         parent.add(frame, weight=1)
         ttk.Label(frame, text=caption, font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
         search = tk.StringVar()
@@ -263,7 +287,7 @@ class ProjectTool:
         wrapper = ttk.Frame(frame)
         wrapper.pack(fill="both", expand=True)
         tree = ttk.Treeview(wrapper, columns=("name", "type", "duration"),
-                           show="tree headings", selectmode="browse")
+                           show="tree headings", selectmode="browse", height=4)
         tree.column("#0", width=34, minwidth=34, stretch=False)
         tree.heading("#0", text="")
         for name, label, width in (("name", "Клип", 270), ("type", "Содержимое", 130),
@@ -277,7 +301,7 @@ class ProjectTool:
         tree.tag_configure("offline", foreground="#d28d88")
         summary = tk.StringVar(value="Клип не выбран")
         ttk.Label(frame, textvariable=summary, style="Selection.TLabel",
-                  wraplength=480).pack(anchor="w", pady=(12, 0))
+                  wraplength=650).pack(anchor="w", pady=(8, 0))
         self.selection_labels[tree] = summary
         self.filters[tree] = search
         search.trace_add("write", lambda *_: self.populate(tree))
@@ -351,7 +375,7 @@ class ProjectTool:
         selected = self.chosen.get(self.primary)
         sound = self.chosen.get(self.secondary)
         if not selected or (self.kind == "audio-sync" and not sound):
-            self.status.set("Выбери видео слева и микрофон справа." if self.secondary
+            self.status.set("Выбери видео в верхнем списке и микрофон в нижнем." if self.secondary
                             else "Выбери клип из списка.")
             return
         source = self.clips[int(selected)]

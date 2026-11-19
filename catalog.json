@@ -5,7 +5,7 @@
       "id": "autocut",
       "name": "Автонарезка по тишине",
       "menu": "DRS - Cut silence",
-      "version": "0004-19112026",
+      "version": "0005-19112026",
       "entry": "resolve_autocut.py",
       "files": [
         "resolve_autocut.py",
@@ -16,7 +16,7 @@
       "id": "scenes",
       "name": "Поиск склеек по смене кадра",
       "menu": "DRS - Find scene cuts",
-      "version": "0002-19112026",
+      "version": "0003-19112026",
       "entry": "resolve_scene_cuts.py",
       "files": [
         "resolve_scene_cuts.py",
@@ -28,7 +28,7 @@
       "id": "quality",
       "name": "Проверка экспорта",
       "menu": "DRS - Check export",
-      "version": "0002-19112026",
+      "version": "0003-19112026",
       "entry": "resolve_quality_check.py",
       "files": [
         "resolve_quality_check.py",
@@ -40,7 +40,7 @@
       "id": "audio-sync",
       "name": "Синхронизация микрофона",
       "menu": "DRS - Sync microphone",
-      "version": "0002-19112026",
+      "version": "0003-19112026",
       "entry": "resolve_audio_sync.py",
       "files": [
         "resolve_audio_sync.py",
@@ -52,7 +52,7 @@
       "id": "subtitles",
       "name": "Речь в субтитры (офлайн)",
       "menu": "DRS - Speech to subtitles",
-      "version": "0002-19112026",
+      "version": "0003-19112026",
       "entry": "resolve_subtitles.py",
       "files": [
         "resolve_subtitles.py",
