@@ -219,6 +219,33 @@ def fetch_catalog_api(destination, token):
     return load_catalog(destination)
 
 
+def remember_catalog(folder, app=APP):
+    """Publish a complete validated snapshot before switching the cache pointer."""
+    items = load_catalog(folder)
+    cache = app / "catalog-cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    snapshot = Path(tempfile.mkdtemp(prefix="snapshot-", dir=cache))
+    names = {"catalog.json"} | {name for item in items for name in item["files"]}
+    for name in names:
+        shutil.copyfile(folder / name, snapshot / name)
+    load_catalog(snapshot)
+    atomic_write(cache / "current.txt", snapshot.name.encode("ascii"))
+    return snapshot
+
+
+def latest_catalog(app=APP):
+    cache = app / "catalog-cache"
+    try:
+        name = (cache / "current.txt").read_text(encoding="ascii")
+        if not re.fullmatch(r"snapshot-[a-z0-9_]+", name):
+            return BUNDLE
+        folder = cache / name
+        load_catalog(folder)
+        return folder
+    except (OSError, ValueError, KeyError, TypeError):
+        return BUNDLE
+
+
 def install(selected, folder, launcher, app=APP, menu=MENU, progress=lambda text: None):
     app.mkdir(parents=True, exist_ok=True)
     menu.mkdir(parents=True, exist_ok=True)
@@ -293,7 +320,7 @@ def gui():
     resolve = StringVar(value=str(find_resolve() or ""))
     status = StringVar(value="Выбери скрипты для установки или проверь обновления.")
     choices = ttk.Frame(panel)
-    folder = BUNDLE
+    folder = latest_catalog()
     rows = []
     temporary = tempfile.TemporaryDirectory(prefix="resolve-scripts-")
 
@@ -320,7 +347,7 @@ def gui():
             ttk.Checkbutton(choices, text=label, variable=choice).pack(anchor="w", pady=3)
             rows.append((item, choice))
 
-    def background(job, success):
+    def background(job, success, quiet=False):
         results = queue.SimpleQueue()
         for button in (apply_button, update_button, choose_button, token_button):
             button.state(["disabled"])
@@ -346,8 +373,10 @@ def gui():
             for button in (apply_button, update_button, choose_button, token_button):
                 button.state(["!disabled"])
             if state == "error":
-                status.set("Операция прервана.")
-                messagebox.showerror("Скрипты DaVinci Resolve", value, parent=root)
+                status.set("GitHub недоступен. Показан сохранённый каталог. Для приватного репозитория проверь вход."
+                           if quiet else "Операция прервана.")
+                if not quiet:
+                    messagebox.showerror("Скрипты DaVinci Resolve", value, parent=root)
             else:
                 success(value)
 
@@ -368,14 +397,15 @@ def gui():
             token = value.strip()
             check()
 
-    def check():
+    def check(quiet=False):
         selected = {item["id"] for item, choice in rows if choice.get()}
         selected.update(item["id"] for item, _ in rows if installed_version(item["id"]))
 
         def download(progress):
             progress("Проверяю каталог в GitHub…")
             path = Path(tempfile.mkdtemp(dir=temporary.name))
-            return path, fetch_catalog(path, token)
+            items = fetch_catalog(path, token)
+            return remember_catalog(path), items
 
         def loaded(result):
             nonlocal folder
@@ -383,9 +413,9 @@ def gui():
             render(items, selected)
             updates = sum(1 for item in items if (current := installed_version(item["id"]))
                           and current < item["version"])
-            status.set(f"Каталог GitHub загружен. Обновлений установленных скриптов: {updates}.")
+            status.set(f"Скриптов в GitHub: {len(items)}. Обновлений установленных: {updates}.")
 
-        background(download, loaded)
+        background(download, loaded, quiet=quiet)
 
     def apply():
         target = Path(resolve.get())
@@ -425,6 +455,7 @@ def gui():
     apply_button.pack(side="right")
     ttk.Label(panel, textvariable=status, wraplength=580).pack(anchor="w")
     render(load_catalog(folder))
+    root.after(250, lambda: check(quiet=True))
     try:
         root.mainloop()
     finally:
