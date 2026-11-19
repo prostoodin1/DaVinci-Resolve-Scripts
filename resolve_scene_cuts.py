@@ -2,10 +2,8 @@
 
 import argparse
 import math
-import queue
 import re
 import sys
-import threading
 from fractions import Fraction
 from pathlib import Path
 
@@ -52,59 +50,8 @@ def create_timeline(source, destination, threshold, minimum):
 
 
 def gui():
-    from tkinter import Tk, filedialog, messagebox, simpledialog, ttk
-
-    root = Tk()
-    root.withdraw()
-    try:
-        source = filedialog.askopenfilename(parent=root, title="Выбери видео для поиска склеек")
-        if not source:
-            return
-        threshold = simpledialog.askfloat(
-            "Поиск склеек", "Порог смены кадра. Меньше — больше склеек.",
-            initialvalue=10, minvalue=0.01, maxvalue=100, parent=root,
-        )
-        if threshold is None:
-            return
-        source = Path(source)
-        output = filedialog.asksaveasfilename(
-            parent=root, title="Сохрани таймлайн", defaultextension=".fcpxml",
-            initialdir=source.parent, initialfile=f"{source.stem}-scenes.fcpxml",
-            filetypes=[("FCPXML", "*.fcpxml")],
-        )
-        if not output:
-            return
-
-        responses = queue.SimpleQueue()
-
-        def analyze():
-            try:
-                responses.put((True, create_timeline(source, Path(output), threshold, 0.5)))
-            except (ValueError, OSError, KeyError) as exc:
-                responses.put((False, str(exc)))
-
-        def poll():
-            try:
-                ok, message = responses.get_nowait()
-            except queue.Empty:
-                root.after(150, poll)
-                return
-            if ok:
-                messagebox.showinfo("Поиск склеек", message + "\nИмпортируй .fcpxml в Resolve.", parent=root)
-            else:
-                messagebox.showerror("Поиск склеек", message, parent=root)
-            root.quit()
-
-        root.title("Поиск склеек")
-        ttk.Label(root, text="Анализирую смены кадра…", padding=18).pack()
-        root.deiconify()
-        threading.Thread(target=analyze, daemon=True).start()
-        root.after(150, poll)
-        root.mainloop()
-    except (ValueError, OSError, KeyError) as exc:
-        messagebox.showerror("Поиск склеек", str(exc), parent=root)
-    finally:
-        root.destroy()
+    from resolve_project_ui import gui as project_gui
+    project_gui("scenes")
 
 
 def main():

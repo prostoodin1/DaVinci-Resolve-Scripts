@@ -2,10 +2,8 @@
 
 import argparse
 import os
-import queue
 import subprocess
 import tempfile
-import threading
 from pathlib import Path
 
 import numpy as np
@@ -103,54 +101,8 @@ def synchronize(video, microphone, output):
 
 
 def gui():
-    from tkinter import Tk, filedialog, messagebox, ttk
-
-    root = Tk()
-    root.withdraw()
-    try:
-        video = filedialog.askopenfilename(parent=root, title="Выбери видео со звуком камеры")
-        if not video:
-            return
-        microphone = filedialog.askopenfilename(parent=root, title="Выбери запись микрофона")
-        if not microphone:
-            return
-        source = Path(video)
-        output = filedialog.asksaveasfilename(
-            parent=root, title="Сохрани синхронизированный звук", defaultextension=".wav",
-            initialdir=source.parent, initialfile=f"{source.stem}-synced.wav",
-            filetypes=[("WAV", "*.wav")],
-        )
-        if not output:
-            return
-        results = queue.SimpleQueue()
-
-        def work():
-            try:
-                results.put((True, synchronize(source, Path(microphone), Path(output))))
-            except (OSError, ValueError, KeyError) as exc:
-                results.put((False, str(exc)))
-
-        def poll():
-            try:
-                ok, result = results.get_nowait()
-            except queue.Empty:
-                root.after(150, poll)
-                return
-            if ok:
-                messagebox.showinfo("Синхронизация", f"Сдвиг микрофона {result:+.3f} с.\n"
-                                    f"Положи готовый WAV на начало видеоклипа.\n{output}", parent=root)
-            else:
-                messagebox.showerror("Синхронизация", result, parent=root)
-            root.quit()
-
-        root.title("Синхронизация микрофона")
-        ttk.Label(root, text="Сравниваю звук камеры и микрофона…", padding=18).pack()
-        root.deiconify()
-        threading.Thread(target=work, daemon=True).start()
-        root.after(150, poll)
-        root.mainloop()
-    finally:
-        root.destroy()
+    from resolve_project_ui import gui as project_gui
+    project_gui("audio-sync")
 
 
 def main():

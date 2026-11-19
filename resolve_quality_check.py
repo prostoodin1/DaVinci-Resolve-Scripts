@@ -5,7 +5,6 @@ import csv
 import re
 import sys
 from pathlib import Path
-from tkinter import Tk, filedialog, messagebox
 
 from resolve_autocut import probe, run
 
@@ -56,30 +55,8 @@ def inspect(source, output):
 
 
 def gui():
-    root = Tk()
-    root.withdraw()
-    try:
-        source = filedialog.askopenfilename(parent=root, title="Выбери видео для проверки")
-        if not source:
-            return
-        source = Path(source)
-        output = filedialog.asksaveasfilename(
-            parent=root, title="Сохрани отчёт проверки", defaultextension=".csv",
-            initialdir=source.parent, initialfile=f"{source.stem}-check.csv",
-            filetypes=[("CSV", "*.csv")],
-        )
-        if output:
-            root.title("Проверка экспорта")
-            from tkinter import ttk
-            ttk.Label(root, text="Проверяю изображение…", padding=18).pack()
-            root.deiconify()
-            root.update()
-            count = inspect(source, Path(output))
-            messagebox.showinfo("Проверка экспорта", f"Участков в отчёте: {count}.\n{output}", parent=root)
-    except (OSError, ValueError, KeyError) as exc:
-        messagebox.showerror("Проверка экспорта", str(exc), parent=root)
-    finally:
-        root.destroy()
+    from resolve_project_ui import gui as project_gui
+    project_gui("quality")
 
 
 def main():

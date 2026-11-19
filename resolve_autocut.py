@@ -4,12 +4,10 @@ import argparse
 import json
 import math
 import os
-import queue
 import re
 import shutil
 import subprocess
 import sys
-import threading
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
@@ -209,89 +207,8 @@ def write_timeline(source, destination, video, fps, frame_count, timecode,
 
 
 def gui():
-    import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
-
-    root = tk.Tk()
-    root.title("Автонарезка для DaVinci Resolve")
-    root.resizable(False, False)
-    panel = ttk.Frame(root, padding=18)
-    panel.grid(sticky="nsew")
-    source = tk.StringVar()
-    audio_file = tk.StringVar()
-    status = tk.StringVar(value="Выбери видео с речью.")
-    fields = [tk.StringVar(value=value) for value in ("-35", "0.65", "0.12")]
-
-    def choose():
-        path = filedialog.askopenfilename(title="Выбери видео")
-        if path:
-            source.set(path)
-
-    def choose_audio():
-        path = filedialog.askopenfilename(title="Выбери отдельный звуковой файл")
-        if path:
-            audio_file.set(path)
-
-    def start():
-        if not source.get().strip():
-            choose()
-        if not source.get().strip():
-            return
-        path = Path(source.get())
-        audio_path = Path(audio_file.get().strip()) if audio_file.get().strip() else None
-        try:
-            settings = [float(field.get().replace(",", ".")) for field in fields]
-        except ValueError:
-            messagebox.showerror("Настройки", "Введи числа в полях настроек.")
-            return
-        output = filedialog.asksaveasfilename(
-            title="Сохранить монтажную линию", defaultextension=".fcpxml",
-            initialdir=path.parent, initialfile=f"{path.stem}-autocut.fcpxml",
-            filetypes=[("FCPXML", "*.fcpxml")],
-        )
-        if not output:
-            return
-        result = queue.SimpleQueue()
-
-        def work():
-            try:
-                result.put((True, create_timeline(path, Path(output), *settings,
-                                                  external_audio=audio_path)))
-            except (OSError, ValueError, KeyError) as exc:
-                result.put((False, str(exc)))
-
-        def poll():
-            try:
-                ok, message = result.get_nowait()
-            except queue.Empty:
-                root.after(150, poll)
-                return
-            export.state(["!disabled"])
-            if ok:
-                status.set(message + "\nВ Resolve открой File → Import → Timeline.")
-            else:
-                status.set("Не удалось собрать монтажную линию.")
-                messagebox.showerror("Автонарезка", message)
-
-        export.state(["disabled"])
-        status.set("Анализирую звук…")
-        threading.Thread(target=work, daemon=True).start()
-        root.after(150, poll)
-
-    ttk.Entry(panel, textvariable=source, width=50).grid(row=0, column=0)
-    ttk.Button(panel, text="Выбрать видео", command=choose).grid(row=0, column=1, padx=(8, 0))
-    ttk.Entry(panel, textvariable=audio_file, width=50).grid(row=1, column=0, pady=(8, 0))
-    ttk.Button(panel, text="Выбрать аудио", command=choose_audio).grid(row=1, column=1, pady=(8, 0))
-    ttk.Label(panel, text="Отдельное аудио. Пустое поле — звук из видео.").grid(
-        row=2, column=0, columnspan=2, sticky="w")
-    labels = ("Порог тишины, дБ", "Минимальная пауза, сек.", "Запас с каждой стороны, сек.")
-    for row, (label, field) in enumerate(zip(labels, fields), start=3):
-        ttk.Label(panel, text=label).grid(row=row, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(panel, textvariable=field, width=12).grid(row=row, column=1, pady=(8, 0))
-    export = ttk.Button(panel, text="Собрать таймлайн", command=start)
-    export.grid(row=6, column=0, columnspan=2, sticky="ew", pady=12)
-    ttk.Label(panel, textvariable=status, wraplength=425).grid(row=7, column=0, columnspan=2, sticky="w")
-    root.mainloop()
+    from resolve_project_ui import gui as project_gui
+    project_gui("autocut")
 
 
 def main():

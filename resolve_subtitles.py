@@ -2,12 +2,10 @@
 
 import argparse
 import os
-import queue
 import re
 import sys
 import tempfile
 import textwrap
-import threading
 from pathlib import Path
 
 from pocketsphinx import Decoder, Segmenter, get_model_path
@@ -109,68 +107,8 @@ def transcribe(source, output, language):
 
 
 def gui():
-    from tkinter import Tk, filedialog, messagebox, ttk
-
-    root = Tk()
-    root.withdraw()
-    try:
-        selected = filedialog.askopenfilename(parent=root, title="Выбери видео или аудио с речью")
-        if not selected:
-            return
-        source = Path(selected)
-        output = filedialog.asksaveasfilename(
-            parent=root, title="Сохрани субтитры", defaultextension=".srt",
-            initialdir=source.parent, initialfile=f"{source.stem}.srt",
-            filetypes=[("SubRip", "*.srt")],
-        )
-        if not output:
-            return
-        root.title("Речь в субтитры")
-        panel = ttk.Frame(root, padding=16)
-        panel.pack(fill="both", expand=True)
-        ttk.Label(panel, text="Выбери язык записи").pack(anchor="w")
-        languages = {"Русский": "ru", "English": "en"}
-        language = ttk.Combobox(panel, state="readonly", values=list(languages))
-        language.current(0)
-        language.pack(fill="x", pady=(6, 12))
-        results = queue.SimpleQueue()
-
-        def submit():
-            chosen = languages[language.get()]
-            button.state(["disabled"])
-            language.state(["disabled"])
-            button.config(text="Распознаю речь…")
-
-            def work():
-                try:
-                    results.put((True, transcribe(source, Path(output), chosen)))
-                except (OSError, ValueError, RuntimeError, KeyError) as exc:
-                    results.put((False, str(exc)))
-
-            threading.Thread(target=work, daemon=True).start()
-            root.after(150, poll)
-
-        def poll():
-            try:
-                ok, result = results.get_nowait()
-            except queue.Empty:
-                root.after(150, poll)
-                return
-            if ok:
-                messagebox.showinfo("Речь в субтитры", f"Сохранено строк: {result}.\n{output}", parent=root)
-                root.quit()
-            else:
-                messagebox.showerror("Речь в субтитры", result, parent=root)
-                button.state(["!disabled"])
-                language.state(["!disabled"])
-                button.config(text="Распознать")
-
-        button = ttk.Button(panel, text="Распознать", command=submit)
-        button.pack(fill="x")
-        root.deiconify()
-        root.mainloop()
-    finally:
-        root.destroy()
+    from resolve_project_ui import gui as project_gui
+    project_gui("subtitles")
 
 
 def main():

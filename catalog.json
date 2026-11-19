@@ -5,41 +5,60 @@
       "id": "autocut",
       "name": "Автонарезка по тишине",
       "menu": "DRS - Cut silence",
-      "version": "0002-17112026",
+      "version": "0003-19112026",
       "entry": "resolve_autocut.py",
-      "files": ["resolve_autocut.py"]
+      "files": [
+        "resolve_autocut.py",
+        "resolve_project_ui.py"
+      ]
     },
     {
       "id": "scenes",
       "name": "Поиск склеек по смене кадра",
       "menu": "DRS - Find scene cuts",
-      "version": "0000-17112026",
+      "version": "0001-19112026",
       "entry": "resolve_scene_cuts.py",
-      "files": ["resolve_scene_cuts.py", "resolve_autocut.py"]
+      "files": [
+        "resolve_scene_cuts.py",
+        "resolve_autocut.py",
+        "resolve_project_ui.py"
+      ]
     },
     {
       "id": "quality",
       "name": "Проверка экспорта",
       "menu": "DRS - Check export",
-      "version": "0000-17112026",
+      "version": "0001-19112026",
       "entry": "resolve_quality_check.py",
-      "files": ["resolve_quality_check.py", "resolve_autocut.py"]
+      "files": [
+        "resolve_quality_check.py",
+        "resolve_autocut.py",
+        "resolve_project_ui.py"
+      ]
     },
     {
       "id": "audio-sync",
       "name": "Синхронизация микрофона",
       "menu": "DRS - Sync microphone",
-      "version": "0000-18112026",
+      "version": "0001-19112026",
       "entry": "resolve_audio_sync.py",
-      "files": ["resolve_audio_sync.py", "resolve_autocut.py"]
+      "files": [
+        "resolve_audio_sync.py",
+        "resolve_autocut.py",
+        "resolve_project_ui.py"
+      ]
     },
     {
       "id": "subtitles",
       "name": "Речь в субтитры (офлайн)",
       "menu": "DRS - Speech to subtitles",
-      "version": "0000-18112026",
+      "version": "0001-19112026",
       "entry": "resolve_subtitles.py",
-      "files": ["resolve_subtitles.py", "resolve_autocut.py"]
+      "files": [
+        "resolve_subtitles.py",
+        "resolve_autocut.py",
+        "resolve_project_ui.py"
+      ]
     },
     {
       "id": "phrase-search",
@@ -47,7 +66,9 @@
       "menu": "DRS - Find phrase",
       "version": "0001-18112026",
       "entry": "resolve_phrase_search.py",
-      "files": ["resolve_phrase_search.py"]
+      "files": [
+        "resolve_phrase_search.py"
+      ]
     },
     {
       "id": "repeated-takes",
@@ -55,7 +76,10 @@
       "menu": "DRS - Find repeated takes",
       "version": "0000-18112026",
       "entry": "resolve_repeated_takes.py",
-      "files": ["resolve_repeated_takes.py", "resolve_phrase_search.py"]
+      "files": [
+        "resolve_repeated_takes.py",
+        "resolve_phrase_search.py"
+      ]
     }
   ]
 }
